@@ -1,0 +1,326 @@
+library(meta4diag)
+library(INLA)
+#data
+library(tidyverse)
+str(outcomes)
+df_meta <- outcomes %>%
+  select(id, TP, FP, FN, TN) %>%
+  filter(!is.na(TP) & !is.na(FP) & !is.na(FN) & !is.na(TN))
+outcomes <- outcomes %>%
+  mutate(
+    TP = as.integer(TP),
+    FP = as.integer(FP),
+    FN = as.integer(FN),
+    TN = as.integer(TN)
+  )
+df_meta$studynames<-df_meta$id
+#model
+meta4diag::makeData(data = outcomes, model.type = 1,modality = "prevalence")
+cauchy_roc<-meta4diag(data = df_meta, model.type = 1,
+                     var2.prior = "Hcauchy",cor.prior = "Normal",
+                     var2.par = c(2.5))
+pc_roc<-meta4diag(data = df_meta, model.type = 1,
+                      var2.prior = "PC",cor.prior = "Normal",
+                      var2.par = c(1,0.05) , nsample = 5000)
+meta4diag::summary.meta4diag(cauchy_roc)
+summary.meta4diag(pc_roc)
+#AUC
+meta4diag::AUC.meta4diag(pc_roc ,sroc.type = 1 )
+AUC.meta4diag(cauchy_roc ,sroc.type = 1 )
+#Sensitivity Plot
+meta4diag::plot.meta4diag(pc_roc,add = TRUE,col = "purple", lwd = 2, lty = 2,
+                          main = "Posterior Distribution of Between-Study Variance in Sensitivity (φ)")
+plot.meta4diag(cauchy_roc,add = TRUE, col = "coral", lwd = 2, lty = 1,
+               main = "Posterior Distribution of Between-Study Variance in Sensitivity (φ)")
+  
+#Specificity Plot
+
+plot.meta4diag(pc_roc,add =TRUE, var.type = "var2", col = "darkred", lwd = 2, lty = 2,
+               main= "Posterior Distribution of Between-Study Variance in Specificity (ψ)")
+plot.meta4diag(cauchy_roc,add =TRUE, var.type = "var2", col= "steelblue", lwd = 2,
+               main = "Posterior Distribution of Between-Study Variance in Specificity (ψ)")
+
+
+legend("bottomright", legend = c("PC","Cauchy"),
+       col = c("purple", "coral"), lty = c(2,1), lwd = 2)
+
+legend("bottomright", legend = c("PC","Cauchy"),
+col = c("darkred", "steelblue"), lty = c(2,1), lwd = 2)
+                          
+
+meta4diag::forest.meta4diag(pc_roc,accuracy.type = "sens",
+                            shade.col = "coral1",arrow.lty = 2,
+                            dataShow = FALSE , 
+                            main = "Forest plot for Senstivity(ψ)")
+forest.meta4diag(pc_roc,accuracy.type = "spec",
+                 shade.col = "coral3",
+                 dataShow = FALSE , 
+                 main = "Forest plot for Specificity (ψ)")
+ #----------------------------------------------------------------
+#PPV and NPV Modelling 
+# Replace 100 with 99.99
+outcomes$ppv[outcomes$ppv == 100] <- 99.99
+outcomes$npv[outcomes$npv == 100] <- 99.99
+
+# Convert to proportions
+outcomes$ppv <- outcomes$ppv / 100
+outcomes$npv <- outcomes$npv / 100
+
+# Optional: also handle 0 to avoid logit issues later
+outcomes$ppv[outcomes$ppv == 0] <- 0.0001
+outcomes$npv[outcomes$npv == 0] <- 0.0001
+#----------------------------------------------------------------
+library(metafor)
+
+# 1. Compute number of cases
+outcomes$cases <- round(outcomes$prevalence * outcomes$n)
+
+# 2. Fit random-effects GLMM (logit link) for prevalence
+prev_model <- rma.glmm(measure = "PLO",
+                       xi = cases,
+                       ni = n,
+                       slab = id, method = "ML",
+                       data = outcomes)
+
+# 3. Summarize results
+summary(prev_model)
+
+# 4. Back-transform logit to proportion
+pooled_prev <- predict(prev_model, transf = transf.ilogit) # gives estimate, 95% CI, PI
+pooled_prev
+
+# Example output: 
+# pooled_prev$pred  -> pooled prevalence
+# pooled_prev$ci.lb / pooled_prev$ci.ub  -> 95% CI
+# pooled_prev$pi.lb / pooled_prev$pi.ub  -> prediction interval
+
+# 5. Generate PPV/NPV bands using your pooled Se/Sp
+# Suppose you have Se/Sp from meta4diag: mean(Se) and mean(Sp)
+mean_Se <- 0.963  # example from Cauchy
+mean_Sp <- 0.957
+
+# Prevalence range (quartiles or full range)
+prev_seq <- seq(0.05, 0.95, by = 0.05)
+
+ppv <- (mean_Se * prev_seq) / ((mean_Se * prev_seq) + ((1 - mean_Sp) * (1 - prev_seq)))
+npv <- (mean_Sp * (1 - prev_seq)) / (((1 - mean_Se) * prev_seq) + (mean_Sp * (1 - prev_seq)))
+
+ppv_npv_df <- data.frame(Prevalence = prev_seq,
+                         PPV = ppv,
+                         NPV = npv)
+
+# Optional: Plot PPV/NPV curves
+library(ggplot2)
+ggplot(ppv_npv_df, aes(x = Prevalence)) +
+  geom_line(aes(y = PPV, color = "PPV"), size = 1.1) +
+  geom_line(aes(y = NPV, color = "NPV"), size = 1.1) +
+  scale_color_manual(values = c("PPV" = "green4", "NPV" = "red4")) +
+  labs(y = "Prevalence", x ="Predictive Value" , color = "Metric",
+       title = "PPV and NPV Across Prevalence") +
+  theme_minimal()
+male<-meta4diag(data = df_meta,
+          model.type = 1,
+          var2.prior = "Hcauchy",
+          cor.prior = "Normal",
+          var2.par = c(2.5),
+          covariates ="m_p")
+str(outcomes)
+df_meta <- outcomes %>%
+  filter(!is.na(TP) & !is.na(TN) & !is.na(FP) & !is.na(FN) & !is.na(age) & !is.na(m_p))
+
+summary(male)
+summary(age)
+
+# 1. Define the vectors of columns
+symptoms_cols <- c("abdominal_pain", "fever", "vomiting", "tender_abdomen",
+                   "bloody_stools", "constipation", "abdominal_mass", "leathargy")
+
+inters_cols <- c("ileo_colic", "ileo_ileal", "colo_colic", "Ileo-Ileo-colic")
+
+lead_cols <- c("meckel's_diverticulum", "polyps", "volvulus", "duplication")
+
+# 2. Function to run meta4diag for a single covariate
+run_meta4diag_cov <- function(df, covariate) {
+  # remove rows with NA in covariate
+  df_clean <- df[!is.na(df[[covariate]]), ]
+  
+  # run model
+  model <- meta4diag(
+    data = df_clean,
+    model.type = 1,
+    var2.prior = "Hcauchy",
+    cor.prior = "Normal",
+    var2.par = c(2.5),
+    covariates = covariate
+  )
+  return(model)
+}
+
+# 3. Run models for symptoms
+symptom_models <- lapply(symptoms_cols, function(x) run_meta4diag_cov(df_meta, x))
+names(symptom_models) <- symptoms_cols
+
+# 4. Run models for intersuscetion types
+inters_models <- lapply(inters_cols, function(x) run_meta4diag_cov(df_meta, x))
+names(inters_models) <- inters_cols
+
+# 5. Run models for lead points
+lead_models <- lapply(lead_cols, function(x) run_meta4diag_cov(df_meta, x))
+names(lead_models) <- lead_cols
+
+# 6. Summarize outputs (example for symptoms)
+symptom_summaries <- lapply(symptom_models, summary.meta4diag)
+symptom_summaries
+meta4diag::funnel.meta4diag(pc_roc, col = "coral4")
+meta4diag::SROC.meta4diag(pc_roc,sroc.type = 1 ,crShow = TRUE,
+                          line.lty = 1, dataFit = 0,data.pch = 22,
+                          cr.col = "coral" ,prShow = TRUE,
+                          pr.col = "cyan4",data.cex = "bubble", main = " (ψ) SROC Plot" ,
+                          xlim = c(0,1),ylim = c(0,1), pr.lty = 2,data.col = "red4",legend = "right")
+
+library("metafor") 
+summary.rma(prev_model)
+str(outcomes)
+library(dplyr)
+
+outcomes <- outcomes %>%
+  mutate(
+    prev_band = case_when(
+      prevalence < 0.10 ~ "Low (<10%)",
+      prevalence >= 0.10 & prevalence <= 0.30 ~ "Medium (10–30%)",
+      prevalence > 0.30 ~ "High (>30%)",
+      TRUE ~ NA_character_
+    )
+  )
+
+# check counts per band
+table(outcomes$prev_band)
+library(mada)
+mada_data <- madad(outcomes, correction = 0.5)
+
+# Deeks’ funnel plot asymmetry test
+deeks_test <- mada::deeks(mada_data)
+metabias(outcomes,method.bias = "Deeks",seTE =0.007  )
+library(meta)
+
+# compute logDOR and its SE
+outcomes$logDOR <- log((outcomes$TP * outcomes$TN) / (outcomes$FP * outcomes$FN))
+outcomes$se_logDOR <- sqrt(1/outcomes$TP + 1/outcomes$FP + 1/outcomes$FN + 1/outcomes$TN)
+
+# create meta-analysis object
+m <- metagen(TE = logDOR,
+             seTE = se_logDOR,
+             data = outcomes,
+             studlab = id,
+             sm = "OR",
+             method.tau = "REML")
+metabias(m,method.bias = "Begg")
+outcomes$op_spec <- c(
+  "Mixed/Unspecified",  # 1  Not specified
+  "Mixed/Unspecified",  # 2  Not specified
+  "Mixed/Unspecified",  # 3  Not specified
+  "Physician",          # 4  Pediatric Emergency Physician (PEM)
+  "Mixed/Unspecified",  # 5  Not specified
+  "Radiologist",        # 6  General Radiologist
+  "Physician",          # 7  Pediatric Emergency Physician
+  "Physician",          # 8  Co-investigator
+  "Physician",          # 9  Pediatric Emergency Physician, Gastroenterologist
+  "Mixed/Unspecified",  # 10 <NA>
+  "Radiologist",        # 11 Senior attending radiologist
+  "Radiologist",        # 12 Staff Radiologists, Senior & Junior Residents
+  "Mixed/Unspecified",  # 13 Not specified
+  "Mixed/Unspecified",  # 14 Not specified
+  "Radiologist",        # 15 Radiologist, Radiology Fellow
+  "Radiologist",        # 16 Pediatric Radiologist
+  "Mixed/Unspecified",  # 17 Sonography Technicians, Residents, Radiologists (mixed)
+  "Mixed/Unspecified",  # 18 Gen. Sonographer, Peds. Sonographer, Resident, Emerg. Radiologist (mixed)
+  "Mixed/Unspecified",  # 19 Not specified
+  "Mixed/Unspecified",  # 20 N/A
+  "Sonographer",        # 21 Pediatric Ultrasonographer
+  "Physician",          # 22 Emergency Medicine Resident
+  "Radiologist",        # 23 Pediatric Radiologists, Residents
+  "Physician",          # 24 Emergency Physician
+  "Physician",          # 25 Emergency Physician
+  "Physician",          # 26 Pediatric Emergency Physician
+  "Radiologist",        # 27 Radiologist
+  "Radiologist",        # 28 Radiologist
+  "Mixed/Unspecified",  # 29 Not specified
+  "Physician",          # 30 Pediatric Emergency Physician
+  "Mixed/Unspecified",  # 31 Not specified
+  "Mixed/Unspecified",  # 32 Not specified
+  "Mixed/Unspecified",  # 33 Not specified
+  "Mixed/Unspecified",  # 34 Not specified
+  "Physician",          # 35 Pediatric Emergency Physician
+  "Radiologist",        # 36 Experienced radiologist
+  "Mixed/Unspecified",  # 37 Not specified
+  "Physician",          # 38 Pediatric Emergency Physician
+  "Mixed/Unspecified",  # 39 Private Sonographer, Resident Doctor, Consultant Radiologist (mixed)
+  "Radiologist",        # 40 Pediatric Radiologist
+  "Radiologist",        # 41 Radiologist, Radiology Resident
+  "Radiologist",        # 42 Radiologist
+  "Sonographer",        # 43 Experienced Sonographer
+  "Mixed/Unspecified"   # 44 Not specified
+)
+
+# Convert to factor with consistent ordering
+outcomes$op_spec <- factor(outcomes$op_spec,
+                           levels = c("Physician", "Radiologist", "Sonographer", "Mixed/Unspecified"))
+library(meta4diag)
+
+library(INLA)
+outcomes <- outcomes %>%
+  mutate(
+    TP = as.integer(TP),
+    FP = as.integer(FP),
+    FN = as.integer(FN),
+    TN = as.integer(TN)
+  )
+operator<-meta4diag(data = outcomes2,
+                model.type = 1,
+                var2.prior = "Hcauchy",
+                cor.prior = "Normal",
+                var2.par = c(2.5),
+                covariates ="op_spec")
+meta4diag::summary.meta4diag(operator)
+
+# Radiologist group
+radiologist_df <- outcomes2 %>%
+  filter(grepl("Radiologist", op_spec, ignore.case = TRUE))
+
+# Emergency physician group
+emergency_df <- outcomes2 %>%
+  filter(grepl("Emergency", op_spec, ignore.case = TRUE))
+
+# Sonographer group
+sonographer_df <- outcomes2 %>%
+  filter(grepl("Sonograph|Ultrason", op_spec, ignore.case = TRUE))
+
+# Not specified / other
+unspecified_df <- outcomes2 %>%
+  filter(grepl("Not specified|N/A|Co-investigator", op_spec, ignore.case = TRUE) |
+           is.na(op_spec))
+operator<-meta4diag(data = outcomes2,
+                model.type = 1,
+                var2.prior = "Hcauchy",
+                cor.prior = "Normal",
+                var2.par = c(2.5),
+                covariates ="op_spec")
+operator_sono<-meta4diag(data = sonographer_df,
+                    model.type = 1,
+                    var2.prior = "Hcauchy",
+                    cor.prior = "Normal",
+                    var2.par = c(2.5),
+                    covariates ="op_spec")
+operator_emer<-meta4diag(data = emergency_df,
+                    model.type = 1,
+                    var2.prior = "Hcauchy",
+                    cor.prior = "Normal",
+                    var2.par = c(2.5),
+                    covariates ="op_spec")
+operator_mixed<-meta4diag(data = unspecified_df,
+                    model.type = 1,
+                    var2.prior = "Hcauchy",
+                    cor.prior = "Normal",
+                    var2.par = c(2.5),
+                    covariates ="op_spec")
+summary.meta4diag(operator)
