@@ -103,15 +103,23 @@ ggplot(ppv_npv_df, aes(x = Prevalence)) +
        title = "PPV and NPV Across Prevalence") +
   theme_minimal()
 #-----------------------------------------------------------------------
+str(outcomes)
+df_meta <- outcomes %>%
+  filter(!is.na(TP) & !is.na(TN) & !is.na(FP) & !is.na(FN) & !is.na(age) & !is.na(m_p))
+
 male<-meta4diag(data = df_meta,
           model.type = 1,
           var2.prior = "Hcauchy",
           cor.prior = "Normal",
           var2.par = c(2.5),
           covariates ="m_p")
-str(outcomes)
-df_meta <- outcomes %>%
-  filter(!is.na(TP) & !is.na(TN) & !is.na(FP) & !is.na(FN) & !is.na(age) & !is.na(m_p))
+age<-meta4diag(data = df_meta,
+                model.type = 1,
+                var2.prior = "Hcauchy",
+                cor.prior = "Normal",
+                var2.par = c(2.5),
+                covariates ="age")
+
 
 summary(male)
 summary(age)
