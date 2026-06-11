@@ -82,7 +82,7 @@ pooled_prev <- predict(prev_model, transf = transf.ilogit)
 
 
 
-# 4. Generate PPV/NPV bands using  pooled Se/Sp
+# 4. Create PPV/NPV bands using  pooled Se/Sp
 mean_Se <- 0.963  
 mean_Sp <- 0.957
 
